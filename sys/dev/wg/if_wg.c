@@ -215,6 +215,9 @@ struct wg_socket {
 	uint32_t	 so_user_cookie;
 	int		 so_fibnum;
 	in_port_t	 so_port;
+    uint32_t	 so_junk_packet_count;
+    uint32_t	 so_junk_packet_min_size;
+    uint32_t	 so_junk_packet_max_size;
 };
 
 struct wg_softc {
@@ -2636,6 +2639,30 @@ wgc_set(struct wg_softc *sc, struct wg_data_io *wgd)
 				sc->sc_socket.so_port = new_port;
 		}
 	}
+    if (nvlist_exists_number(nvl, "jc")) {
+		uint64_t jc = nvlist_get_number(nvl, "jc");
+		if (jc > UINT8_MAX) {
+			err = EINVAL;
+			goto out_locked;
+		}
+        sc->sc_socket.so_junk_packet_count = jc;
+	}
+    if (nvlist_exists_number(nvl, "jmin")) {
+		uint64_t jmin = nvlist_get_number(nvl, "jmin");
+		if (jmin > 1200) {
+			err = EINVAL;
+			goto out_locked;
+		}
+        sc->sc_socket.so_junk_packet_min_size = jmin;
+	}
+    if (nvlist_exists_number(nvl, "jmax")) {
+		uint64_t jmax = nvlist_get_number(nvl, "jmax");
+		if (jmax > 1420 || jmax < sc->sc_socket.so_junk_packet_min_size) {
+			err = EINVAL;
+			goto out_locked;
+		}
+        sc->sc_socket.so_junk_packet_max_size = jmax;
+	}
 	if (nvlist_exists_binary(nvl, "private-key")) {
 		const void *key = nvlist_get_binary(nvl, "private-key", &size);
 		if (size != WG_KEY_SIZE) {
@@ -2722,6 +2749,12 @@ wgc_get(struct wg_softc *sc, struct wg_data_io *wgd)
 
 	if (sc->sc_socket.so_port != 0)
 		nvlist_add_number(nvl, "listen-port", sc->sc_socket.so_port);
+	if (sc->sc_socket.so_junk_packet_count > 0)
+		nvlist_add_number(nvl, "jc", sc->sc_socket.so_junk_packet_count);
+	if (sc->sc_socket.so_junk_packet_min_size > 0)
+		nvlist_add_number(nvl, "jmin", sc->sc_socket.so_junk_packet_min_size);
+	if (sc->sc_socket.so_junk_packet_max_size > 0)
+		nvlist_add_number(nvl, "jmax", sc->sc_socket.so_junk_packet_max_size);
 	if (sc->sc_socket.so_user_cookie != 0)
 		nvlist_add_number(nvl, "user-cookie", sc->sc_socket.so_user_cookie);
 	if (noise_local_keys(sc->sc_local, public_key, private_key) == 0) {

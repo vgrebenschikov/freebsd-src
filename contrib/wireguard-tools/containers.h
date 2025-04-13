@@ -7,6 +7,7 @@
 #define CONTAINERS_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
 #include <sys/socket.h>
@@ -48,7 +49,8 @@ enum {
 	WGPEER_REPLACE_ALLOWEDIPS = 1U << 1,
 	WGPEER_HAS_PUBLIC_KEY = 1U << 2,
 	WGPEER_HAS_PRESHARED_KEY = 1U << 3,
-	WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL = 1U << 4
+	WGPEER_HAS_PERSISTENT_KEEPALIVE_INTERVAL = 1U << 4,
+	WGPEER_HAS_ADVANCED_SECURITY = 1U << 5
 };
 
 struct wgpeer {
@@ -67,6 +69,8 @@ struct wgpeer {
 	uint64_t rx_bytes, tx_bytes;
 	uint16_t persistent_keepalive_interval;
 
+	bool advanced_security;
+
 	struct wgallowedip *first_allowedip, *last_allowedip;
 	struct wgpeer *next_peer;
 };
@@ -76,7 +80,16 @@ enum {
 	WGDEVICE_HAS_PRIVATE_KEY = 1U << 1,
 	WGDEVICE_HAS_PUBLIC_KEY = 1U << 2,
 	WGDEVICE_HAS_LISTEN_PORT = 1U << 3,
-	WGDEVICE_HAS_FWMARK = 1U << 4
+	WGDEVICE_HAS_FWMARK = 1U << 4,
+	WGDEVICE_HAS_JC = 1U << 5,
+	WGDEVICE_HAS_JMIN = 1U << 6,
+	WGDEVICE_HAS_JMAX = 1U << 7,
+	WGDEVICE_HAS_S1 = 1U << 8,
+	WGDEVICE_HAS_S2 = 1U << 9,
+	WGDEVICE_HAS_H1 = 1U << 10,
+	WGDEVICE_HAS_H2 = 1U << 11,
+	WGDEVICE_HAS_H3 = 1U << 12,
+	WGDEVICE_HAS_H4 = 1U << 13
 };
 
 struct wgdevice {
@@ -92,6 +105,16 @@ struct wgdevice {
 	uint16_t listen_port;
 
 	struct wgpeer *first_peer, *last_peer;
+
+	uint16_t junk_packet_count;
+	uint16_t junk_packet_min_size;
+	uint16_t junk_packet_max_size;
+	uint16_t init_packet_junk_size;
+	uint16_t response_packet_junk_size;
+	uint32_t init_packet_magic_header;
+	uint32_t response_packet_magic_header;
+	uint32_t underload_packet_magic_header;
+	uint32_t transport_packet_magic_header;
 };
 
 #define for_each_wgpeer(__dev, __peer) for ((__peer) = (__dev)->first_peer; (__peer); (__peer) = (__peer)->next_peer)

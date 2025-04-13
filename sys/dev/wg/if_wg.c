@@ -1290,9 +1290,40 @@ wg_peer_send_buf(struct wg_peer *peer, uint8_t *buf, size_t len)
 }
 
 static void
+wg_send_junk_packets(struct wg_peer *peer)
+{
+	struct wg_softc *sc = peer->p_sc;
+	uint8_t *buf;
+	size_t size;
+	int i;
+
+	for (i = 0; i < sc->sc_socket.so_junk_packet_count; i++) {
+		/* Generate random size between min and max */
+		size = arc4random_uniform(sc->sc_socket.so_junk_packet_max_size -
+		    sc->sc_socket.so_junk_packet_min_size + 1) +
+		    sc->sc_socket.so_junk_packet_min_size;
+
+		buf = malloc(size, M_DEVBUF, M_NOWAIT);
+		if (buf == NULL)
+			continue;
+
+		/* Fill with random data */
+		arc4random_buf(buf, size);
+
+		/* Send to peer's endpoint */
+		wg_peer_send_buf(peer, buf, size);
+
+		free(buf, M_DEVBUF);
+	}
+}
+
+static void
 wg_send_initiation(struct wg_peer *peer)
 {
 	struct wg_pkt_initiation pkt;
+
+	/* Send junk packets before handshake */
+	wg_send_junk_packets(peer);
 
 	if (noise_create_initiation(peer->p_remote, &pkt.s_idx, pkt.ue,
 	    pkt.es, pkt.ets) != 0)
@@ -3018,6 +3049,9 @@ wg_clone_create(struct if_clone *ifc, char *name, size_t len,
 	sc->sc_ucred = crhold(curthread->td_ucred);
 	sc->sc_socket.so_fibnum = curthread->td_proc->p_fibnum;
 	sc->sc_socket.so_port = 0;
+	sc->sc_socket.so_junk_packet_count = 0;
+	sc->sc_socket.so_junk_packet_min_size = 0;
+	sc->sc_socket.so_junk_packet_max_size = 0;
 
 	TAILQ_INIT(&sc->sc_peers);
 	sc->sc_peers_num = 0;

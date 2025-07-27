@@ -5,6 +5,7 @@
  * Copyright (c) 2019-2020 Rubicon Communications, LLC (Netgate)
  * Copyright (c) 2021 Kyle Evans <kevans@FreeBSD.org>
  * Copyright (c) 2022 The FreeBSD Foundation
+ * Copyright (C) 2025 Vladimir Grebenshchikov <vova@zote.me>
  */
 
 #include "opt_inet.h"
@@ -601,6 +602,7 @@ wg_aip_add(struct wg_softc *sc, struct wg_peer *peer, sa_family_t af,
 
 	root = af == AF_INET ? sc->sc_aip4 : sc->sc_aip6;
 	MPASS(root != NULL);
+
 	RADIX_NODE_HEAD_LOCK(root);
 	node = root->rnh_addaddr(&aip->a_addr, &aip->a_mask, &root->rh, aip->a_nodes);
 	if (node == aip->a_nodes) {
@@ -906,6 +908,17 @@ wg_socket_bind(struct socket **in_so4, struct socket **in_so6, in_port_t *reques
 		if (ret4 && ret4 != EADDRNOTAVAIL)
 			return (ret4);
 		if (!ret4 && !sin.sin_port) {
+#if __FreeBSD_version >= 1500000
+			struct sockaddr_in bound_sin =
+			    { .sin_len = sizeof(bound_sin) };
+			int ret;
+
+			ret = sosockaddr(so4, (struct sockaddr *)&bound_sin);
+			if (ret)
+				return (ret);
+			port = ntohs(bound_sin.sin_port);
+			sin6.sin6_port = bound_sin.sin_port;
+#else
 			struct sockaddr_in *bound_sin;
 			int ret = so4->so_proto->pr_sockaddr(so4,
 			    (struct sockaddr **)&bound_sin);
@@ -914,6 +927,7 @@ wg_socket_bind(struct socket **in_so4, struct socket **in_so6, in_port_t *reques
 			port = ntohs(bound_sin->sin_port);
 			sin6.sin6_port = bound_sin->sin_port;
 			free(bound_sin, M_SONAME);
+#endif
 		}
 	}
 
@@ -922,6 +936,16 @@ wg_socket_bind(struct socket **in_so4, struct socket **in_so6, in_port_t *reques
 		if (ret6 && ret6 != EADDRNOTAVAIL)
 			return (ret6);
 		if (!ret6 && !sin6.sin6_port) {
+#if __FreeBSD_version >= 1500000
+			struct sockaddr_in6 bound_sin6 =
+			    { .sin6_len = sizeof(bound_sin6) };
+			int ret;
+
+			ret = sosockaddr(so6, (struct sockaddr *)&bound_sin6);
+			if (ret)
+				return (ret);
+			port = ntohs(bound_sin6.sin6_port);
+#else
 			struct sockaddr_in6 *bound_sin6;
 			int ret = so6->so_proto->pr_sockaddr(so6,
 			    (struct sockaddr **)&bound_sin6);
@@ -929,6 +953,7 @@ wg_socket_bind(struct socket **in_so4, struct socket **in_so6, in_port_t *reques
 				return (ret);
 			port = ntohs(bound_sin6->sin6_port);
 			free(bound_sin6, M_SONAME);
+#endif
 		}
 	}
 
@@ -2129,12 +2154,16 @@ wg_skip_junk_input(struct mbuf *m, struct wg_softc *sc)
 	if (assumed_offset == 0)
 		return m;
 
-	m = m_pullup(m, assumed_offset + sizeof(uint32_t));
-	if (m == NULL)
-		return m;
+	if (m->m_len < assumed_offset + sizeof(uint32_t)) {
+		/* pullup only if not whole packet header in mbuf */
+		m = m_pullup(m, assumed_offset + sizeof(uint32_t));
+		if (m == NULL)
+			return m;
+	}
 
 	/* verify packet type */
 	if (*(uint32_t *)mtodo(m, assumed_offset) != assumed_type) {
+		DPRINTF(sc, "Amnezia: wrong type after skip junk in handshake\n");
 		return m;
 	}
 
@@ -2173,7 +2202,10 @@ wg_input(struct mbuf *m, int offset, struct inpcb *inpcb,
 	m_adj(m, offset + sizeof(struct udphdr));
 
 	/* Check if this packet has junk to skip, doing m_pullup if needed*/
-	m = wg_skip_junk_input(m, sc);
+	if ((m = wg_skip_junk_input(m, sc)) == NULL) {
+		if_inc_counter(sc->sc_ifp, IFCOUNTER_IQDROPS, 1);
+		return true;
+	}
 
 	/* Pullup enough to read packet type */
 	if ((m = m_pullup(m, sizeof(uint32_t))) == NULL) {

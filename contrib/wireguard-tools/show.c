@@ -342,39 +342,39 @@ static bool ugly_print(struct wgdevice *device, const char *param, bool with_int
 		if (with_interface)
 			printf("%s\t", device->name);
 		printf("%u\n", device->junk_packet_count);
-	} else if(!strcmp(param, "jmin")) {
+	 } else if(!strcmp(param, "jmin")) {
 		if (with_interface)
 			printf("%s\t", device->name);
 		printf("%u\n", device->junk_packet_min_size);
-	} else if(!strcmp(param, "jmax")) {
+	 } else if(!strcmp(param, "jmax")) {
 		if (with_interface)
 			printf("%s\t", device->name);
 		printf("%u\n", device->junk_packet_max_size);
-	} else if(!strcmp(param, "s1")) {
+	 } else if(!strcmp(param, "s1")) {
 		if (with_interface)
 			printf("%s\t", device->name);
 		printf("%u\n", device->init_packet_junk_size);
-	} else if(!strcmp(param, "s2")) {
+	 } else if(!strcmp(param, "s2")) {
 		if (with_interface)
 			printf("%s\t", device->name);
 		printf("%u\n", device->response_packet_junk_size);
-	} else if(!strcmp(param, "h1")) {
+	 } else if(!strcmp(param, "h1")) {
 		if (with_interface)
 			printf("%s\t", device->name);
 		printf("%u\n", device->init_packet_magic_header);
-	} else if(!strcmp(param, "h2")) {
+	 } else if(!strcmp(param, "h2")) {
 		if (with_interface)
 			printf("%s\t", device->name);
 		printf("%u\n", device->response_packet_magic_header);
-	} else if(!strcmp(param, "h3")) {
+	 } else if(!strcmp(param, "h3")) {
 		if (with_interface)
 			printf("%s\t", device->name);
 		printf("%u\n", device->underload_packet_magic_header);
-	} else if(!strcmp(param, "h4")) {
+	 } else if(!strcmp(param, "h4")) {
 		if (with_interface)
 			printf("%s\t", device->name);
 		printf("%u\n", device->transport_packet_magic_header);
-	} else if (!strcmp(param, "endpoints")) {
+	 } else if (!strcmp(param, "endpoints")) {
 		for_each_wgpeer(device, peer) {
 			if (with_interface)
 				printf("%s\t", device->name);

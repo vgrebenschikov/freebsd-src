@@ -660,6 +660,31 @@ void ipfw_destroy_counters(void);
 int ipfw_commit_rules(struct ip_fw_chain *chain, struct rule_check_info *rci,
     int count);
 int delete_range(struct ip_fw_chain *chain, ipfw_range_tlv *rt, int *ndel);
+int move_range(struct ip_fw_chain *chain, ipfw_range_tlv *rt);
+int clear_range(struct ip_fw_chain *chain, ipfw_range_tlv *rt, int log_only);
+int ipfw_swap_sets(struct ip_fw_chain *chain, ipfw_range_tlv *rt, int mv);
+void ipfw_enable_sets(struct ip_fw_chain *chain, ipfw_range_tlv *rt);
+
+/*
+ * Arguments for dump_config()/dump_static_rules() and their compat
+ * variants. Consumed by ip_fw_sockopt.c and ip_fw_compat.c. The
+ * "rule_" prefix avoids clashing with an unrelated, private
+ * struct dump_args in ip_fw_table.c.
+ */
+struct rule_dump_args {
+	uint32_t	b;		/* start rule */
+	uint32_t	e;		/* end rule */
+	uint32_t	rcount;		/* number of rules */
+	uint32_t	rsize;		/* rules size */
+	uint32_t	tcount;		/* number of tables */
+	int		rcounters;	/* counters */
+	uint32_t	*bmask;		/* index bitmask of used named objects */
+};
+
+void export_cntr1_base(struct ip_fw *krule, struct ip_fw_bcounter *cntr);
+void export_rule1(struct ip_fw *krule, caddr_t data, int len, int rcntrs);
+void mark_rule_objects(struct ip_fw_chain *ch, struct ip_fw *rule,
+    struct rule_dump_args *da);
 struct ip_fw *ipfw_alloc_rule(struct ip_fw_chain *chain, size_t rulesize);
 void ipfw_free_rule(struct ip_fw *rule);
 int ipfw_match_range(struct ip_fw *rule, ipfw_range_tlv *rt);

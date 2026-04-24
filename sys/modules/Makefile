@@ -182,6 +182,7 @@ SUBDIR=	\
 	ipdivert \
 	${_ipfilter} \
 	${_ipfw} \
+	${_ipfw_compat} \
 	ipfw_nat \
 	${_ipfw_nat64} \
 	${_ipfw_nptv6} \
@@ -506,6 +507,7 @@ _if_stf=	if_stf
 .if (${KERN_OPTS:MINET} && ${MK_INET_SUPPORT} != "no") || defined(ALL_MODULES)
 _if_me=		if_me
 _ipfw=		ipfw
+_ipfw_compat=	ipfw_compat
 .if ${MK_INET6_SUPPORT} != "no" || defined(ALL_MODULES)
 _ipfw_nat64=	ipfw_nat64
 .endif

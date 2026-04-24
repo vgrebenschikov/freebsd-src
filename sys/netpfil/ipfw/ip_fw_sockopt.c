@@ -354,7 +354,7 @@ swap_map(struct ip_fw_chain *chain, struct ip_fw **new_map, int new_len)
 	return old_map;
 }
 
-static void
+void
 export_cntr1_base(struct ip_fw *krule, struct ip_fw_bcounter *cntr)
 {
 	struct timeval boottime;
@@ -381,7 +381,7 @@ export_cntr1_base(struct ip_fw *krule, struct ip_fw_bcounter *cntr)
  * ]
  * Assume @data is zeroed.
  */
-static void
+void
 export_rule1(struct ip_fw *krule, caddr_t data, int len, int rcntrs)
 {
 	struct ip_fw_bcounter *cntr;
@@ -901,7 +901,7 @@ move_objects(struct ip_fw_chain *ch, ipfw_range_tlv *rt)
  *
  * Returns 0 on success.
  */
-static int
+int
 move_range(struct ip_fw_chain *chain, ipfw_range_tlv *rt)
 {
 	struct ip_fw *rule;
@@ -984,7 +984,7 @@ clear_counters(struct ip_fw *rule, int log_only)
  *
  * Returns number of items cleared.
  */
-static int
+int
 clear_range(struct ip_fw_chain *chain, ipfw_range_tlv *rt, int log_only)
 {
 	struct ip_fw *rule;
@@ -1128,8 +1128,8 @@ clear_rules(struct ip_fw_chain *chain, ip_fw3_opheader *op3,
 	return (0);
 }
 
-static void
-enable_sets(struct ip_fw_chain *chain, ipfw_range_tlv *rt)
+void
+ipfw_enable_sets(struct ip_fw_chain *chain, ipfw_range_tlv *rt)
 {
 	uint32_t v_set;
 
@@ -1143,8 +1143,8 @@ enable_sets(struct ip_fw_chain *chain, ipfw_range_tlv *rt)
 	IPFW_WUNLOCK(chain);
 }
 
-static int
-swap_sets(struct ip_fw_chain *chain, ipfw_range_tlv *rt, int mv)
+int
+ipfw_swap_sets(struct ip_fw_chain *chain, ipfw_range_tlv *rt, int mv)
 {
 	struct opcode_obj_rewrite *rw;
 	struct ip_fw *rule;
@@ -1219,11 +1219,11 @@ manage_sets(struct ip_fw_chain *chain, ip_fw3_opheader *op3,
 	switch (op3->opcode) {
 	case IP_FW_SET_SWAP:
 	case IP_FW_SET_MOVE:
-		ret = swap_sets(chain, &rh->range,
+		ret = ipfw_swap_sets(chain, &rh->range,
 		    op3->opcode == IP_FW_SET_MOVE);
 		break;
 	case IP_FW_SET_ENABLE:
-		enable_sets(chain, &rh->range);
+		ipfw_enable_sets(chain, &rh->range);
 		break;
 	}
 	IPFW_UH_WUNLOCK(chain);
@@ -1697,16 +1697,6 @@ check_ipfw_rule_body(ipfw_insn *cmd, int cmd_len, struct rule_check_info *ci)
 	return (0);
 }
 
-struct dump_args {
-	uint32_t	b;	/* start rule */
-	uint32_t	e;	/* end rule */
-	uint32_t	rcount;	/* number of rules */
-	uint32_t	rsize;	/* rules size */
-	uint32_t	tcount;	/* number of tables */
-	int		rcounters;	/* counters */
-	uint32_t	*bmask;	/* index bitmask of used named objects */
-};
-
 void
 ipfw_export_obj_ntlv(struct named_object *no, ipfw_obj_ntlv *ntlv)
 {
@@ -1742,7 +1732,7 @@ export_objhash_ntlv(struct namedobj_instance *ni, uint32_t kidx,
 }
 
 static int
-export_named_objects(struct namedobj_instance *ni, struct dump_args *da,
+export_named_objects(struct namedobj_instance *ni, struct rule_dump_args *da,
     struct sockopt_data *sd)
 {
 	uint32_t i;
@@ -1759,7 +1749,7 @@ export_named_objects(struct namedobj_instance *ni, struct dump_args *da,
 }
 
 static int
-dump_named_objects(struct ip_fw_chain *ch, struct dump_args *da,
+dump_named_objects(struct ip_fw_chain *ch, struct rule_dump_args *da,
     struct sockopt_data *sd)
 {
 	ipfw_obj_ctlv *ctlv;
@@ -1791,7 +1781,7 @@ dump_named_objects(struct ip_fw_chain *ch, struct dump_args *da,
  * Returns 0 on success.
  */
 static int
-dump_static_rules(struct ip_fw_chain *chain, struct dump_args *da,
+dump_static_rules(struct ip_fw_chain *chain, struct rule_dump_args *da,
     struct sockopt_data *sd)
 {
 	ipfw_obj_ctlv *ctlv;
@@ -1845,9 +1835,9 @@ ipfw_mark_object_kidx(uint32_t *bmask, uint16_t etlv, uint32_t kidx)
  * Used to generate bitmask of referenced tables/objects for given ruleset
  * or its part.
  */
-static void
+void
 mark_rule_objects(struct ip_fw_chain *ch, struct ip_fw *rule,
-    struct dump_args *da)
+    struct rule_dump_args *da)
 {
 	struct opcode_obj_rewrite *rw;
 	ipfw_insn *cmd;
@@ -1891,7 +1881,7 @@ static int
 dump_config(struct ip_fw_chain *chain, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
-	struct dump_args da;
+	struct rule_dump_args da;
 	ipfw_cfg_lheader *hdr;
 	struct ip_fw *rule;
 	size_t sz, rnum;

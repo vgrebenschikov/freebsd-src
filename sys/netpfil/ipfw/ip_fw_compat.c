@@ -169,11 +169,417 @@ static struct ipfw_sopt_handler scodes[] = {
     { IP_FW_DUMP_SRVOBJECTS,	IP_FW3_OPVER_0, HDIR_GET, dump_srvobjects_v0 },
 };
 
+/*
+ * Calculate v0 cmd length for a v1 opcode (inverse of adjust_size_v0()).
+ * Returns v0 length in u32 words for @cmd encoded in v1.
+ */
+static int
+v0_cmdlen_for_v1(ipfw_insn *cmd)
+{
+	int cmdlen;
+
+	cmdlen = F_LEN(cmd);
+	switch (cmd->opcode) {
+	case O_CHECK_STATE:
+	case O_KEEP_STATE:
+	case O_PROBE_STATE:
+	case O_EXTERNAL_ACTION:
+	case O_EXTERNAL_INSTANCE:
+		return (F_INSN_SIZE(ipfw_insn));
+	case O_LIMIT:
+		return (F_INSN_SIZE(ipfw_insn_limit_v0));
+	case O_IP_SRC_LOOKUP:
+	case O_IP_DST_LOOKUP:
+	case O_IP_FLOW_LOOKUP:
+	case O_MAC_SRC_LOOKUP:
+	case O_MAC_DST_LOOKUP:
+		if (cmdlen == F_INSN_SIZE(ipfw_insn_kidx))
+			return (F_INSN_SIZE(ipfw_insn));
+		if (cmdlen == F_INSN_SIZE(ipfw_insn_table))
+			return (F_INSN_SIZE(ipfw_insn_u32));
+		return (cmdlen);
+	case O_SKIPTO:
+	case O_CALLRETURN:
+		return (F_INSN_SIZE(ipfw_insn));
+	default:
+		return (cmdlen);
+	}
+}
+
+/*
+ * Inverse of convert_v0_to_v1(): copy @src v1 opcode stream into @dst v0.
+ * Returns number of u32 words written to @dst.
+ */
+static void
+convert_v1_to_v0(ipfw_insn *src, ipfw_insn *dst, int cmd_len_v1,
+    uint16_t *act_ofs_v0, uint16_t act_ofs_v1)
+{
+	ipfw_insn *start = dst;
+	int l, cmdlen, newlen;
+
+	*act_ofs_v0 = 0;
+	for (l = cmd_len_v1; l > 0;
+	    l -= cmdlen, src += cmdlen, dst += newlen) {
+		cmdlen = F_LEN(src);
+		if (cmd_len_v1 - l == act_ofs_v1)
+			*act_ofs_v0 = dst - start;
+		switch (src->opcode) {
+		case O_CHECK_STATE:
+		case O_KEEP_STATE:
+		case O_PROBE_STATE:
+		case O_EXTERNAL_ACTION:
+		case O_EXTERNAL_INSTANCE:
+			newlen = F_INSN_SIZE(ipfw_insn);
+			dst->opcode = src->opcode;
+			dst->len = (src->len & (F_NOT | F_OR)) | newlen;
+			dst->arg1 = (uint16_t)insntoc(src, kidx)->kidx;
+			break;
+		case O_LIMIT: {
+			ipfw_insn_limit_v0 *d0;
+			const ipfw_insn_limit *s1;
+
+			newlen = F_INSN_SIZE(ipfw_insn_limit_v0);
+			s1 = insntoc(src, limit);
+			d0 = (ipfw_insn_limit_v0 *)dst;
+			d0->o.opcode = src->opcode;
+			d0->o.len = (src->len & (F_NOT | F_OR)) | newlen;
+			d0->o.arg1 = (uint16_t)s1->kidx;
+			d0->_pad = 0;
+			d0->limit_mask = s1->limit_mask;
+			d0->conn_limit = s1->conn_limit;
+			break;
+		}
+		case O_IP_SRC_LOOKUP:
+		case O_IP_DST_LOOKUP:
+		case O_IP_FLOW_LOOKUP:
+		case O_MAC_SRC_LOOKUP:
+		case O_MAC_DST_LOOKUP:
+			if (cmdlen == F_INSN_SIZE(ipfw_insn_kidx)) {
+				newlen = F_INSN_SIZE(ipfw_insn);
+				dst->opcode = src->opcode;
+				dst->len = (src->len & (F_NOT | F_OR)) | newlen;
+				dst->arg1 =
+				    (uint16_t)insntoc(src, kidx)->kidx;
+			} else if (cmdlen == F_INSN_SIZE(ipfw_insn_table)) {
+				const ipfw_insn_table *st;
+				ipfw_insn_u32 *d32;
+
+				newlen = F_INSN_SIZE(ipfw_insn_u32);
+				st = insntoc(src, table);
+				d32 = (ipfw_insn_u32 *)dst;
+				d32->o.opcode = src->opcode;
+				d32->o.len =
+				    (src->len & (F_NOT | F_OR)) | newlen;
+				d32->o.arg1 = (uint16_t)st->kidx;
+				d32->d[0] = st->value;
+			} else {
+				newlen = cmdlen;
+				memcpy(dst, src, sizeof(uint32_t) * newlen);
+			}
+			break;
+		case O_SKIPTO:
+		case O_CALLRETURN:
+			newlen = F_INSN_SIZE(ipfw_insn);
+			dst->opcode = src->opcode;
+			dst->len = (src->len & (F_NOT | F_OR)) | newlen;
+			dst->arg1 =
+			    (uint16_t)insntoc(src, u32)->d[0];
+			break;
+		default:
+			newlen = cmdlen;
+			memcpy(dst, src, sizeof(uint32_t) * newlen);
+			break;
+		}
+	}
+	if (cmd_len_v1 == act_ofs_v1)
+		*act_ofs_v0 = dst - start;
+}
+
+/*
+ * Compute v0 cmd_len (in u32 words) for @krule's cmd stream.
+ */
+static uint16_t
+v0_cmd_len(struct ip_fw *krule)
+{
+	ipfw_insn *cmd;
+	int l, cmdlen;
+	uint16_t total;
+
+	total = 0;
+	cmd = krule->cmd;
+	for (l = krule->cmd_len; l > 0; l -= cmdlen, cmd += cmdlen) {
+		cmdlen = F_LEN(cmd);
+		total += v0_cmdlen_for_v1(cmd);
+	}
+	return (total);
+}
+
+/*
+ * Total size (in bytes) of a single exported v0 rule, including TLV header.
+ * Mirrors RULEUSIZE1() but for the (possibly shorter) v0 encoding.
+ */
+static size_t
+ruleusize1_v0(struct ip_fw *krule)
+{
+	uint16_t cmd_len;
+
+	cmd_len = v0_cmd_len(krule);
+	return (roundup2(sizeof(struct ip_fw_rule) + cmd_len * 4 - 4, 8));
+}
+
+/*
+ * Export @krule into v0 userland buffer @data.
+ * Layout:
+ * [ ipfw_obj_tlv(IPFW_TLV_RULE_ENT) [ ip_fw_bcounter (optional) ip_fw_rule ] ]
+ * Assumes @data is zeroed.
+ */
+static void
+export_rule_v0(struct ip_fw *krule, caddr_t data, int len, int rcntrs)
+{
+	struct ip_fw_bcounter *cntr;
+	struct ip_fw_rule *urule;
+	ipfw_obj_tlv *tlv;
+	uint16_t act_ofs;
+
+	tlv = (ipfw_obj_tlv *)data;
+	tlv->type = IPFW_TLV_RULE_ENT;
+	tlv->length = len;
+
+	if (rcntrs != 0) {
+		cntr = (struct ip_fw_bcounter *)(tlv + 1);
+		urule = (struct ip_fw_rule *)(cntr + 1);
+		export_cntr1_base(krule, cntr);
+	} else
+		urule = (struct ip_fw_rule *)(tlv + 1);
+
+	convert_v1_to_v0(krule->cmd, urule->cmd, krule->cmd_len, &act_ofs,
+	    krule->act_ofs);
+
+	urule->act_ofs = act_ofs;
+	urule->cmd_len = v0_cmd_len(krule);
+	urule->rulenum = krule->rulenum;
+	urule->set = krule->set;
+	urule->flags = krule->flags;
+	urule->id = krule->id;
+}
+
+/*
+ * Dump static rules (with v0 cmd stream) in @sd. Mirrors dump_static_rules()
+ * but writes v0-encoded rules.
+ */
+static int
+dump_static_rules_v0(struct ip_fw_chain *chain, struct rule_dump_args *da,
+    struct sockopt_data *sd)
+{
+	ipfw_obj_ctlv *ctlv;
+	struct ip_fw *krule;
+	caddr_t dst;
+	uint32_t i;
+	int l;
+
+	ctlv = (ipfw_obj_ctlv *)ipfw_get_sopt_space(sd, sizeof(*ctlv));
+	if (ctlv == NULL)
+		return (ENOMEM);
+	ctlv->head.type = IPFW_TLV_RULE_LIST;
+	ctlv->head.length = da->rsize + sizeof(*ctlv);
+	ctlv->count = da->rcount;
+
+	for (i = da->b; i < da->e; i++) {
+		krule = chain->map[i];
+
+		/* Skip rules with rulenum that doesn't fit v0 userland */
+		if (krule->rulenum > IPFW_DEFAULT_RULE)
+			continue;
+
+		l = ruleusize1_v0(krule) + sizeof(ipfw_obj_tlv);
+		if (da->rcounters != 0)
+			l += sizeof(struct ip_fw_bcounter);
+		dst = (caddr_t)ipfw_get_sopt_space(sd, l);
+		if (dst == NULL)
+			return (ENOMEM);
+
+		export_rule_v0(krule, dst, l, da->rcounters);
+	}
+
+	return (0);
+}
+
+/*
+ * Export one named object as ipfw_obj_ntlv_v0 (16-bit idx).
+ * Returns 0 on success or ENOMEM.
+ */
+static int
+export_objhash_ntlv_v0(struct namedobj_instance *ni, uint32_t kidx,
+    struct sockopt_data *sd)
+{
+	struct named_object *no;
+	ipfw_obj_ntlv_v0 *ntlv;
+
+	no = ipfw_objhash_lookup_kidx(ni, kidx);
+	KASSERT(no != NULL, ("invalid object kernel index passed"));
+
+	ntlv = (ipfw_obj_ntlv_v0 *)ipfw_get_sopt_space(sd, sizeof(*ntlv));
+	if (ntlv == NULL)
+		return (ENOMEM);
+
+	ntlv->head.type = no->etlv;
+	ntlv->head.length = sizeof(*ntlv);
+	/* v0 idx is 16-bit; drop high bits if present. */
+	ntlv->idx = (uint16_t)no->kidx;
+	strlcpy(ntlv->name, no->name, sizeof(ntlv->name));
+	return (0);
+}
+
+static int
+export_named_objects_v0(struct namedobj_instance *ni,
+    struct rule_dump_args *da, struct sockopt_data *sd)
+{
+	uint32_t i;
+	int error;
+
+	for (i = 0; i < IPFW_TABLES_MAX && da->tcount > 0; i++) {
+		if ((da->bmask[i / 32] & (1 << (i % 32))) == 0)
+			continue;
+		if ((error = export_objhash_ntlv_v0(ni, i, sd)) != 0)
+			return (error);
+		da->tcount--;
+	}
+	return (0);
+}
+
+static int
+dump_named_objects_v0(struct ip_fw_chain *ch, struct rule_dump_args *da,
+    struct sockopt_data *sd)
+{
+	ipfw_obj_ctlv *ctlv;
+	int error;
+
+	MPASS(da->tcount > 0);
+	ctlv = (ipfw_obj_ctlv *)ipfw_get_sopt_space(sd, sizeof(*ctlv));
+	if (ctlv == NULL)
+		return (ENOMEM);
+	ctlv->head.type = IPFW_TLV_TBLNAME_LIST;
+	ctlv->head.length = da->tcount * sizeof(ipfw_obj_ntlv_v0) +
+	    sizeof(*ctlv);
+	ctlv->count = da->tcount;
+	ctlv->objsize = sizeof(ipfw_obj_ntlv_v0);
+
+	error = export_named_objects_v0(ipfw_get_table_objhash(ch), da, sd);
+	if (error != 0)
+		return (error);
+	da->bmask += IPFW_TABLES_MAX / 32;
+	return (export_named_objects_v0(CHAIN_TO_SRV(ch), da, sd));
+}
+
+/*
+ * Dumps requested objects data (v0 layout). Mirrors dump_config() in
+ * ip_fw_sockopt.c but emits v0-sized ipfw_obj_ntlv and converts the per-rule
+ * cmd stream back to v0 encoding. Dynamic states are not exported in v0 yet.
+ *
+ * Data layout (v0):
+ * Request: [ ipfw_cfg_lheader ] + IPFW_CFG_GET_* flags
+ * Reply: [ ipfw_cfg_lheader
+ *   [ ipfw_obj_ctlv(IPFW_TLV_TBL_LIST) ipfw_obj_ntlv_v0 x N ] (optional)
+ *   [ ipfw_obj_ctlv(IPFW_TLV_RULE_LIST)
+ *     ipfw_obj_tlv(IPFW_TLV_RULE_ENT) [ ip_fw_bcounter? ip_fw_rule ]
+ *   ] (optional)
+ * ]
+ */
 static int
 dump_config_v0(struct ip_fw_chain *chain, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
-	return (EOPNOTSUPP);
+	struct rule_dump_args da;
+	ipfw_cfg_lheader *hdr;
+	struct ip_fw *rule;
+	size_t sz, rnum;
+	uint32_t hdr_flags, *bmask;
+	int error, i;
+
+	hdr = (ipfw_cfg_lheader *)ipfw_get_sopt_header(sd, sizeof(*hdr));
+	if (hdr == NULL)
+		return (EINVAL);
+
+	error = 0;
+	bmask = NULL;
+	memset(&da, 0, sizeof(da));
+	if (hdr->flags & (IPFW_CFG_GET_STATIC | IPFW_CFG_GET_STATES))
+		da.bmask = bmask = malloc(
+		    sizeof(uint32_t) * IPFW_TABLES_MAX * 2 / 32, M_TEMP,
+		    M_WAITOK | M_ZERO);
+	IPFW_UH_RLOCK(chain);
+
+	/*
+	 * STAGE 1: Determine size/count for objects in range.
+	 */
+	sz = sizeof(ipfw_cfg_lheader);
+	da.e = chain->n_rules;
+
+	if (hdr->end_rule != 0) {
+		if ((rnum = hdr->start_rule) > IPFW_DEFAULT_RULE)
+			rnum = IPFW_DEFAULT_RULE;
+		da.b = ipfw_find_rule(chain, rnum, 0);
+		rnum = (hdr->end_rule < IPFW_DEFAULT_RULE) ?
+		    hdr->end_rule + 1: IPFW_DEFAULT_RULE;
+		da.e = ipfw_find_rule(chain, rnum, UINT32_MAX) + 1;
+	}
+
+	if (hdr->flags & IPFW_CFG_GET_STATIC) {
+		for (i = da.b; i < da.e; i++) {
+			rule = chain->map[i];
+			/* Hide rules with rulenum > 16-bit from v0. */
+			if (rule->rulenum > IPFW_DEFAULT_RULE)
+				continue;
+			da.rsize += ruleusize1_v0(rule) + sizeof(ipfw_obj_tlv);
+			da.rcount++;
+			mark_rule_objects(chain, rule, &da);
+		}
+		if (hdr->flags & IPFW_CFG_GET_COUNTERS) {
+			da.rsize += sizeof(struct ip_fw_bcounter) * da.rcount;
+			da.rcounters = 1;
+		}
+		sz += da.rsize + sizeof(ipfw_obj_ctlv);
+	}
+
+	if (da.tcount > 0)
+		sz += da.tcount * sizeof(ipfw_obj_ntlv_v0) +
+		    sizeof(ipfw_obj_ctlv);
+
+	hdr->size = sz;
+	hdr->set_mask = ~V_set_disable;
+	hdr_flags = hdr->flags;
+	hdr = NULL;
+
+	if (sd->valsize < sz) {
+		error = ENOMEM;
+		goto cleanup;
+	}
+
+	/* STAGE 2: Store actual data */
+	if (da.tcount > 0) {
+		error = dump_named_objects_v0(chain, &da, sd);
+		if (error != 0)
+			goto cleanup;
+	}
+
+	if (hdr_flags & IPFW_CFG_GET_STATIC) {
+		error = dump_static_rules_v0(chain, &da, sd);
+		if (error != 0)
+			goto cleanup;
+	}
+
+	/*
+	 * Dynamic states export in v0 layout is not implemented;
+	 * userland will just see an empty state list.
+	 */
+
+cleanup:
+	IPFW_UH_RUNLOCK(chain);
+
+	if (bmask != NULL)
+		free(bmask, M_TEMP);
+
+	return (error);
 }
 
 /*
@@ -545,25 +951,122 @@ del_rules_v0(struct ip_fw_chain *chain, ip_fw3_opheader *op3,
 	return (0);
 }
 
+/*
+ * Clear rule accounting data matching specified parameters.
+ * Data layout (v0):
+ * Request:  [ ip_fw3_opheader ipfw_range_tlv_v0 ]
+ * Reply:    [ ip_fw3_opheader ipfw_range_tlv_v0 ] (new_set = num cleared)
+ */
 static int
 clear_rules_v0(struct ip_fw_chain *chain, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
-	return (EOPNOTSUPP);
+	ipfw_range_tlv rv;
+	ipfw_range_header_v0 *rh;
+	int log_only, num;
+	char *msg;
+
+	if (sd->valsize != sizeof(*rh))
+		return (EINVAL);
+
+	rh = (ipfw_range_header_v0 *)ipfw_get_sopt_space(sd, sd->valsize);
+	if (check_range_tlv_v0(&rh->range, &rv) != 0)
+		return (EINVAL);
+
+	log_only = (op3->opcode == IP_FW_XRESETLOG);
+	num = clear_range(chain, &rv, log_only);
+
+	if (rv.flags & IPFW_RCFLAG_ALL)
+		msg = log_only ? "All logging counts reset" :
+		    "Accounting cleared";
+	else
+		msg = log_only ? "logging count reset" : "cleared";
+
+	if (V_fw_verbose) {
+		int lev = LOG_SECURITY | LOG_NOTICE;
+		log(lev, "ipfw: %s.\n", msg);
+	}
+
+	/* Save number of rules cleared */
+	rh->range.new_set = num;
+	return (0);
 }
 
+/*
+ * Move rules matching specified parameters to a new set.
+ * Data layout (v0):
+ * Request: [ ip_fw3_opheader ipfw_range_tlv_v0 ]
+ */
 static int
 move_rules_v0(struct ip_fw_chain *chain, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
-	return (EOPNOTSUPP);
+	ipfw_range_tlv rv;
+	ipfw_range_header_v0 *rh;
+
+	if (sd->valsize != sizeof(*rh))
+		return (EINVAL);
+
+	rh = (ipfw_range_header_v0 *)ipfw_get_sopt_space(sd, sd->valsize);
+	if (check_range_tlv_v0(&rh->range, &rv) != 0)
+		return (EINVAL);
+
+	return (move_range(chain, &rv));
 }
 
+/*
+ * Swap/move/enable sets.
+ * Data layout (v0):
+ * Request: [ ip_fw3_opheader ipfw_range_tlv_v0 ]
+ *
+ * Note: for IP_FW_SET_ENABLE the .set / .new_set fields are bitmasks of sets
+ * rather than set indices, so the IPFW_MAX_SETS check in check_range_tlv_v0()
+ * is not applicable.
+ */
 static int
 manage_sets_v0(struct ip_fw_chain *chain, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
-	return (EOPNOTSUPP);
+	ipfw_range_tlv rv;
+	ipfw_range_header_v0 *rh;
+	int ret;
+
+	if (sd->valsize != sizeof(*rh))
+		return (EINVAL);
+
+	rh = (ipfw_range_header_v0 *)ipfw_get_sopt_space(sd, sd->valsize);
+
+	if (rh->range.head.length != sizeof(rh->range))
+		return (EINVAL);
+	if (op3->opcode != IP_FW_SET_ENABLE &&
+	    (rh->range.set >= IPFW_MAX_SETS ||
+	    rh->range.new_set >= IPFW_MAX_SETS))
+		return (EINVAL);
+
+	memset(&rv, 0, sizeof(rv));
+	rv.head = rh->range.head;
+	rv.head.length = sizeof(rv);
+	rv.flags = rh->range.flags;
+	rv.start_rule = rh->range.start_rule;
+	rv.end_rule = rh->range.end_rule;
+	rv.set = rh->range.set;
+	rv.new_set = rh->range.new_set;
+
+	ret = 0;
+	IPFW_UH_WLOCK(chain);
+	switch (op3->opcode) {
+	case IP_FW_SET_SWAP:
+	case IP_FW_SET_MOVE:
+		ret = ipfw_swap_sets(chain, &rv,
+		    op3->opcode == IP_FW_SET_MOVE);
+		break;
+	case IP_FW_SET_ENABLE:
+		ipfw_enable_sets(chain, &rv);
+		break;
+	}
+	IPFW_UH_WUNLOCK(chain);
+
+	return (ret);
 }
 
 static int

@@ -709,7 +709,7 @@ check_table_space(struct ip_fw_chain *ch, struct table_config *tc,
  *
  * Returns 0 on success
  */
-static int
+int
 manage_table_ent_v1(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
@@ -831,7 +831,7 @@ manage_table_ent_v1(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
  *
  * Returns 0 on success
  */
-static int
+int
 find_table_entry(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
@@ -897,7 +897,7 @@ find_table_entry(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
  *
  * Returns 0 on success
  */
-static int
+int
 flush_table_v0(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
@@ -1024,7 +1024,7 @@ flush_table(struct ip_fw_chain *ch, struct tid_info *ti)
  *
  * Returns 0 on success
  */
-static int
+int
 swap_table(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
@@ -1368,7 +1368,7 @@ ipfw_lookup_table(struct ip_fw_chain *ch, uint32_t tbl, uint16_t plen,
  *
  * Returns 0 on success
  */
-static int
+int
 list_tables(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
@@ -1396,7 +1396,7 @@ list_tables(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
  *
  * Returns 0 on success.
  */
-static int
+int
 describe_table(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
@@ -1431,7 +1431,7 @@ describe_table(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
  *
  * Returns 0 on success
  */
-static int
+int
 modify_table(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
@@ -1488,7 +1488,7 @@ modify_table(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
  *
  * Returns 0 on success
  */
-static int
+int
 create_table(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {
@@ -1833,7 +1833,7 @@ export_tables(struct ip_fw_chain *ch, ipfw_obj_lheader *olh,
  *
  * Returns 0 on success
  */
-static int
+int
 dump_table_v1(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
     struct sockopt_data *sd)
 {

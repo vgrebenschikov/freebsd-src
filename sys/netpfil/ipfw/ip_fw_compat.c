@@ -155,6 +155,9 @@ static sopt_handler_f dump_config_v0, add_rules_v0, del_rules_v0,
     clear_rules_v0, move_rules_v0, manage_sets_v0, dump_soptcodes_v0,
     dump_srvobjects_v0;
 
+static sopt_handler_f manage_table_ent_v1_compat, find_table_entry_compat,
+    dump_table_v1_compat;
+
 static struct ipfw_sopt_handler scodes[] = {
     { IP_FW_XGET,		IP_FW3_OPVER_0, HDIR_GET, dump_config_v0 },
     { IP_FW_XADD,		IP_FW3_OPVER_0, HDIR_BOTH, add_rules_v0 },
@@ -167,6 +170,69 @@ static struct ipfw_sopt_handler scodes[] = {
     { IP_FW_SET_ENABLE,		IP_FW3_OPVER_0, HDIR_SET, manage_sets_v0 },
     { IP_FW_DUMP_SOPTCODES,	IP_FW3_OPVER_0, HDIR_GET, dump_soptcodes_v0 },
     { IP_FW_DUMP_SRVOBJECTS,	IP_FW3_OPVER_0, HDIR_GET, dump_srvobjects_v0 },
+    /*
+     * IP_FW_TABLE_* sockopts.
+     *
+     * The on-wire structures used by these handlers (ipfw_obj_header,
+     * ipfw_obj_ntlv, ipfw_obj_tentry, ipfw_xtable_info) preserved their
+     * total size in the v0 -> v1 transition; only the layout of a small
+     * idx/spare pair changed inside ipfw_obj_header and ipfw_obj_ntlv,
+     * and the analogous idx/spare1 pair in ipfw_obj_tentry.
+     *
+     * Most table operations (XCREATE, XINFO, XDESTROY, XFLUSH, XMODIFY,
+     * XSWAP, XLIST tables) only care about ntlv.name, which is at the
+     * same offset in both layouts, so the v1 handlers can be reused
+     * verbatim. Operations that look the table up via tent->idx or that
+     * cross-reference oh->ntlv.idx with tent->idx (XADD, XDEL, XFIND,
+     * XLIST entries) need an explicit conversion wrapper - see the
+     * v1_overrides[] array below.
+     */
+    { IP_FW_TABLE_XCREATE,	IP_FW3_OPVER_0, HDIR_SET,  create_table },
+    { IP_FW_TABLE_XDESTROY,	IP_FW3_OPVER_0, HDIR_SET,  flush_table_v0 },
+    { IP_FW_TABLE_XFLUSH,	IP_FW3_OPVER_0, HDIR_SET,  flush_table_v0 },
+    { IP_FW_TABLE_XMODIFY,	IP_FW3_OPVER_0, HDIR_BOTH, modify_table },
+    { IP_FW_TABLE_XINFO,	IP_FW3_OPVER_0, HDIR_GET,  describe_table },
+    { IP_FW_TABLES_XLIST,	IP_FW3_OPVER_0, HDIR_GET,  list_tables },
+    { IP_FW_TABLE_XSWAP,	IP_FW3_OPVER_0, HDIR_SET,  swap_table },
+    /*
+     * The 14.x ipfw(8) sends version=0 only for XFIND; XADD/XDEL/XLIST
+     * are sent with version=1 (the original wire version of those
+     * handlers) and therefore reach the kernel through v1_overrides[]
+     * below. We still register the wrapper under version=0 here so that
+     * builds of 14.x ipfw(8) which omit the version=1 override land in
+     * the same conversion path.
+     */
+    { IP_FW_TABLE_XADD,		IP_FW3_OPVER_0, HDIR_BOTH,
+	manage_table_ent_v1_compat },
+    { IP_FW_TABLE_XDEL,		IP_FW3_OPVER_0, HDIR_BOTH,
+	manage_table_ent_v1_compat },
+    { IP_FW_TABLE_XFIND,	IP_FW3_OPVER_0, HDIR_GET,
+	find_table_entry_compat },
+    { IP_FW_TABLE_XLIST,	IP_FW3_OPVER_0, HDIR_GET,
+	dump_table_v1_compat },
+};
+
+/*
+ * Originals taken over from ip_fw_table.c at module load. We DELete the
+ * original (opcode, version=1, original-handler) registration and ADD our
+ * compat wrapper in its place; on unload we reverse the operation.
+ */
+static struct ipfw_sopt_handler v1_originals[] = {
+    { IP_FW_TABLE_XADD,		IP_FW3_OPVER, HDIR_BOTH, manage_table_ent_v1 },
+    { IP_FW_TABLE_XDEL,		IP_FW3_OPVER, HDIR_BOTH, manage_table_ent_v1 },
+    { IP_FW_TABLE_XLIST,	IP_FW3_OPVER, HDIR_GET,  dump_table_v1 },
+    { IP_FW_TABLE_XFIND,	IP_FW3_OPVER, HDIR_GET,  find_table_entry },
+};
+
+static struct ipfw_sopt_handler v1_overrides[] = {
+    { IP_FW_TABLE_XADD,		IP_FW3_OPVER, HDIR_BOTH,
+	manage_table_ent_v1_compat },
+    { IP_FW_TABLE_XDEL,		IP_FW3_OPVER, HDIR_BOTH,
+	manage_table_ent_v1_compat },
+    { IP_FW_TABLE_XLIST,	IP_FW3_OPVER, HDIR_GET,
+	dump_table_v1_compat },
+    { IP_FW_TABLE_XFIND,	IP_FW3_OPVER, HDIR_GET,
+	find_table_entry_compat },
 };
 
 /*
@@ -1182,16 +1248,189 @@ check_opcode_compat(ipfw_insn **pcmd, int *plen, struct rule_check_info *ci)
 	return (SUCCESS);
 }
 
+/*
+ * 14.x -> 15.x compatibility for IP_FW_TABLE_X{ADD,DEL,LIST,FIND}
+ * =================================================================
+ *
+ * Commit 4a77657cbc01 widened a number of `idx` fields from 16 to 32 bits
+ * and rearranged the surrounding spare bytes in the on-wire structures
+ * used by IP_FW3 socket options:
+ *
+ *	ipfw_obj_header	(16-byte tail after the ip_fw3_opheader):
+ *		v0: spare(u32) idx(u16)  objtype(u8) objsubtype(u8)
+ *		v1: idx(u32)   spare(u16) objtype(u8) objsubtype(u8)
+ *
+ *	ipfw_obj_ntlv	(16-byte tail after ipfw_obj_tlv head):
+ *		v0: idx(u16) set(u8) type(u8) spare(u32) name[64]
+ *		v1: idx(u32) set(u8) type(u8) spare(u16) name[64]
+ *
+ *	ipfw_obj_tentry (the idx slot at offset 12):
+ *		v0: idx(u16) spare1(u16)
+ *		v1: idx(u32)
+ *
+ * The total wire size of every structure is preserved, and the table
+ * name (the only field most XINFO/XCREATE/XLIST handlers consult) lives
+ * at the same offset in both layouts. That is why the table operations
+ * registered under IP_FW3_OPVER_0 above keep working with the unmodified
+ * v1 handlers.
+ *
+ * However, XADD, XDEL, XFIND and XLIST(entries) reach into the idx/set
+ * fields. They locate the table by `tent->idx` (used as ti.uidx) and
+ * then look the corresponding ntlv up by that uidx. With a 14.x client
+ * the v1 reinterpretation produces e.g. ntlv.idx = 0x04000001 (table
+ * type byte spilling into the high bits of idx) and tent.idx = 1, so
+ * the search never matches and add_table_entry() returns ESRCH ("table
+ * not found").
+ *
+ * The 14.x ipfw(8) always sets oh->idx = 1 (a legacy index marker), so
+ * after v1 reinterpret the high half of that area - which v1 calls
+ * `oh->spare` - becomes 1. 15.x clients leave both fields zero. We use
+ * that as the heuristic to decide whether to rewrite the request to v1
+ * layout in place before invoking the underlying v1 handler.
+ */
+static bool
+ipfw_compat_obj_header_is_v0(const ipfw_obj_header *oh)
+{
+
+	return (oh->spare != 0);
+}
+
+static void
+ipfw_compat_obj_ntlv_v0_to_v1(ipfw_obj_ntlv *ntlv)
+{
+	uint8_t *raw = (uint8_t *)ntlv;
+	uint8_t set, type;
+
+	/* Pull set/type from their v0 byte offsets before overwriting. */
+	set = raw[10];	/* v0 ntlv.set */
+	type = raw[11];	/* v0 ntlv.type */
+
+	ntlv->idx = 0;
+	ntlv->set = set;
+	ntlv->type = type;
+	ntlv->spare = 0;
+}
+
+static void
+ipfw_compat_obj_header_v0_to_v1(ipfw_obj_header *oh)
+{
+	/*
+	 * The objtype/objsubtype bytes already line up between v0 and v1
+	 * (both are the trailing two bytes of the 8-byte tail after the
+	 * opheader). All we have to fix is the idx/spare pair.
+	 */
+	oh->idx = 0;
+	oh->spare = 0;
+	ipfw_compat_obj_ntlv_v0_to_v1(&oh->ntlv);
+}
+
+static void
+ipfw_compat_obj_tentry_v0_to_v1(ipfw_obj_tentry *tent)
+{
+	/*
+	 * In v0 the slot at offset 12 was idx(u16) + spare1(u16); 14.x
+	 * always writes idx == oh->idx == 1 (the legacy marker) and
+	 * leaves spare1 == 0. Replace the resulting v1 idx (== 1) with
+	 * 0 so the v1 handler falls back to looking the table up by
+	 * name via oh->ntlv (which we have already rewritten).
+	 *
+	 * The ipfw_table_value union that follows differs in field
+	 * layout between v0 and v1 but its wire size is unchanged. We
+	 * deliberately do not translate value contents here: that only
+	 * matters for callers that pass non-zero values (e.g.
+	 * `ipfw table N add KEY VALUE`), which 14.x ipfw(8) was already
+	 * unable to express portably.
+	 */
+	tent->idx = 0;
+}
+
+static int
+manage_table_ent_v1_compat(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd)
+{
+	ipfw_obj_header *oh;
+	ipfw_obj_ctlv *ctlv;
+	ipfw_obj_tentry *tent;
+	uint32_t i;
+
+	if (sd->valsize >= sizeof(*oh) + sizeof(*ctlv)) {
+		oh = (ipfw_obj_header *)sd->kbuf;
+		if (ipfw_compat_obj_header_is_v0(oh)) {
+			uint32_t cnt, max_cnt;
+
+			ipfw_compat_obj_header_v0_to_v1(oh);
+			ctlv = (ipfw_obj_ctlv *)(oh + 1);
+			tent = (ipfw_obj_tentry *)(ctlv + 1);
+			/*
+			 * Defensively cap the count by the available buffer
+			 * before the underlying v1 handler has had a chance
+			 * to validate it.
+			 */
+			max_cnt = (sd->valsize - sizeof(*oh) -
+			    sizeof(*ctlv)) / sizeof(*tent);
+			cnt = ctlv->count;
+			if (cnt > max_cnt)
+				cnt = max_cnt;
+			for (i = 0; i < cnt; i++)
+				ipfw_compat_obj_tentry_v0_to_v1(&tent[i]);
+		}
+	}
+	return (manage_table_ent_v1(ch, op3, sd));
+}
+
+static int
+find_table_entry_compat(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd)
+{
+	ipfw_obj_header *oh;
+	ipfw_obj_tentry *tent;
+
+	if (sd->valsize >= sizeof(*oh) + sizeof(*tent)) {
+		oh = (ipfw_obj_header *)sd->kbuf;
+		if (ipfw_compat_obj_header_is_v0(oh)) {
+			ipfw_compat_obj_header_v0_to_v1(oh);
+			tent = (ipfw_obj_tentry *)(oh + 1);
+			ipfw_compat_obj_tentry_v0_to_v1(tent);
+		}
+	}
+	return (find_table_entry(ch, op3, sd));
+}
+
+static int
+dump_table_v1_compat(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd)
+{
+	ipfw_obj_header *oh;
+
+	if (sd->valsize >= sizeof(*oh)) {
+		oh = (ipfw_obj_header *)sd->kbuf;
+		if (ipfw_compat_obj_header_is_v0(oh))
+			ipfw_compat_obj_header_v0_to_v1(oh);
+	}
+	return (dump_table_v1(ch, op3, sd));
+}
+
 static int
 ipfw_compat_modevent(module_t mod, int type, void *unused)
 {
 	switch (type) {
 	case MOD_LOAD:
 		IPFW_ADD_SOPT_HANDLER(1, scodes);
+		/*
+		 * Replace the v1 table sockopt handlers with our wrappers
+		 * so that 14.x clients (which set opheader.version = 1 for
+		 * XADD/XDEL/XLIST entries and rely on legacy v0 layout for
+		 * the body) get the request rewritten to v1 layout before
+		 * the underlying handler runs.
+		 */
+		IPFW_DEL_SOPT_HANDLER(1, v1_originals);
+		IPFW_ADD_SOPT_HANDLER(1, v1_overrides);
 		ipfw_register_compat(check_opcode_compat);
 		break;
 	case MOD_UNLOAD:
 		ipfw_unregister_compat();
+		IPFW_DEL_SOPT_HANDLER(1, v1_overrides);
+		IPFW_ADD_SOPT_HANDLER(1, v1_originals);
 		IPFW_DEL_SOPT_HANDLER(1, scodes);
 		break;
 	default:

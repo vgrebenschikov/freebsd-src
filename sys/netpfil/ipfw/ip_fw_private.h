@@ -685,6 +685,32 @@ void export_cntr1_base(struct ip_fw *krule, struct ip_fw_bcounter *cntr);
 void export_rule1(struct ip_fw *krule, caddr_t data, int len, int rcntrs);
 void mark_rule_objects(struct ip_fw_chain *ch, struct ip_fw *rule,
     struct rule_dump_args *da);
+
+/*
+ * IP_FW_TABLE_* sockopt handlers (defined in ip_fw_table.c). Exposed so
+ * that ip_fw_compat.c can re-register them under IP_FW3_OPVER_0; the
+ * on-wire layouts of ipfw_obj_header / ipfw_obj_ntlv / ipfw_obj_tentry
+ * preserve their size and field offsets used by typical 14.x callers
+ * (idx/set are typically 0; the table name lives at a fixed offset).
+ */
+int create_table(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd);
+int flush_table_v0(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd);
+int modify_table(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd);
+int describe_table(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd);
+int list_tables(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd);
+int dump_table_v1(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd);
+int manage_table_ent_v1(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd);
+int find_table_entry(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd);
+int swap_table(struct ip_fw_chain *ch, ip_fw3_opheader *op3,
+    struct sockopt_data *sd);
 struct ip_fw *ipfw_alloc_rule(struct ip_fw_chain *chain, size_t rulesize);
 void ipfw_free_rule(struct ip_fw *rule);
 int ipfw_match_range(struct ip_fw *rule, ipfw_range_tlv *rt);

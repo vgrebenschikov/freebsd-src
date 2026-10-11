@@ -59,6 +59,7 @@
 #include <sys/stat.h>
 #include <sys/sx.h>
 #include <sys/sysctl.h>
+#include <sys/sysent.h>
 #include <sys/time.h>
 #include <sys/ttycom.h>
 #include <sys/unistd.h>
@@ -698,7 +699,7 @@ devfs_close(struct vop_close_args *ap)
 	struct cdev *dev = vp->v_rdev;
 	struct cdevsw *dsw;
 	struct devfs_dirent *de = vp->v_data;
-	int dflags, error, ref, vp_locked;
+	int dflags, error, hold_ctty, ref, usecount, vp_locked;
 
 	/*
 	 * XXX: Don't call d_close() if we were called because of
@@ -715,7 +716,13 @@ devfs_close(struct vop_close_args *ap)
 	 * process' controlling terminal.  In that case,
 	 * if the reference count is 2 (this last descriptor
 	 * plus the session), release the reference from the session.
+	 *
+	 * Linux keeps the controlling terminal after the last
+	 * slave descriptor is closed.  A Linux closer leaves the
+	 * session reference in place; FLASTCLOSE is still forced
+	 * below so the driver sees the last user close.
 	 */
+	hold_ctty = 0;
 	if (de->de_usecount == 2 && td != NULL) {
 		p = td->td_proc;
 		PROC_LOCK(p);
@@ -728,9 +735,13 @@ devfs_close(struct vop_close_args *ap)
 				mtx_lock(&devfs_de_interlock);
 				VI_LOCK(vp);
 				if (devfs_usecountl(vp) == 2 && !VN_IS_DOOMED(vp)) {
-					p->p_session->s_ttyvp = NULL;
-					p->p_session->s_ttydp = NULL;
-					oldvp = vp;
+					if (SV_PROC_ABI(p) == SV_ABI_LINUX)
+						hold_ctty = 1;
+					else {
+						p->p_session->s_ttyvp = NULL;
+						p->p_session->s_ttydp = NULL;
+						oldvp = vp;
+					}
 				}
 				VI_UNLOCK(vp);
 				mtx_unlock(&devfs_de_interlock);
@@ -755,12 +766,23 @@ devfs_close(struct vop_close_args *ap)
 	if (dsw == NULL)
 		return (ENXIO);
 	dflags = 0;
+	if (hold_ctty != 0) {
+		sx_slock(&proctree_lock);
+		SESS_LOCK(p->p_session);
+	}
 	mtx_lock(&devfs_de_interlock);
 	VI_LOCK(vp);
-	if (devfs_usecountl(vp) == 1)
+	usecount = devfs_usecountl(vp);
+	if (usecount == 1 ||
+	    (hold_ctty != 0 && usecount == 2 && !VN_IS_DOOMED(vp) &&
+	    p->p_session->s_ttyvp == vp))
 		dflags |= FLASTCLOSE;
 	devfs_usecount_subl(vp);
 	mtx_unlock(&devfs_de_interlock);
+	if (hold_ctty != 0) {
+		SESS_UNLOCK(p->p_session);
+		sx_sunlock(&proctree_lock);
+	}
 	if (VN_IS_DOOMED(vp)) {
 		/* Forced close. */
 		dflags |= FREVOKE | FNONBLOCK;

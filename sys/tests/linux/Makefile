@@ -14,23 +14,24 @@ ATF_TESTS_C+=	epoll_fork
 
 LIBADD.devfs_pty=	util
 
-SCRIPTS+=	devfs_pty_linux
-SCRIPTSDIR_devfs_pty_linux=	${TESTSDIR}
-SCRIPTS+=	epoll_fork_linux
-SCRIPTSDIR_epoll_fork_linux=	${TESTSDIR}
-CLEANFILES+=	devfs_pty_linux epoll_fork_linux
+LINUX_HELPERS=	devfs_pty_linux epoll_fork_linux
+LINUX_CFLAGS=	--target=${LINUX_TARGET} -fno-stack-protector -fno-builtin \
+		-O2 -Wall -Wextra -Werror
+LINUX_LDFLAGS=	-fuse-ld=lld -nostdlib -static -Wl,-e,_start \
+		-Wl,--build-id=none
+LINUX_CRT=	linux_crt0.c linux_crt0.h linux_syscalls.c linux_syscalls.h
 
-devfs_pty_linux: devfs_pty_linux.c linux_crt0.c linux_crt0.h \
-	linux_syscalls.c linux_syscalls.h
-	${CC} --target=${LINUX_TARGET} -fuse-ld=lld -nostdlib -static \
-	    -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror \
-	    -Wl,-e,_start -Wl,--build-id=none -o ${.TARGET} ${.ALLSRC:M*.c}
+SCRIPTS+=	${LINUX_HELPERS}
+CLEANFILES+=	${LINUX_HELPERS}
 
-epoll_fork_linux: epoll_fork_linux.c linux_crt0.c linux_crt0.h \
-	linux_syscalls.c linux_syscalls.h
-	${CC} --target=${LINUX_TARGET} -fuse-ld=lld -nostdlib -static \
-	    -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror \
-	    -Wl,-e,_start -Wl,--build-id=none -o ${.TARGET} ${.ALLSRC:M*.c}
+.for _helper in ${LINUX_HELPERS}
+SCRIPTSDIR_${_helper}=	${TESTSDIR}
+
+${_helper}: ${_helper}.c ${LINUX_CRT}
+	${CC} ${LINUX_CFLAGS} ${LINUX_LDFLAGS} -o ${.TARGET} \
+	    ${.ALLSRC:M*.c}
+	brandelf -t Linux ${.TARGET}
+.endfor
 .endif
 
 .include <bsd.test.mk>

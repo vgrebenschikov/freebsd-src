@@ -4,9 +4,11 @@
  * Copyright (c) 2026 Vladimir Grebenshchikov <vova@zote.me>
  */
 
+#include <linux_syscall.h>
+
 #include "linux_syscalls.h"
 
-#if defined(__x86_64__)
+#if defined(__amd64__)
 static long
 linux_syscall(long number, long arg1, long arg2, long arg3, long arg4,
     long arg5, long arg6)
@@ -26,77 +28,93 @@ long
 linux_close(int fd)
 {
 
-	return (linux_syscall(3, fd, 0, 0, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_close, fd, 0, 0, 0, 0, 0));
+}
+
+long
+linux_close_range(unsigned int first, unsigned int last, unsigned int flags)
+{
+
+	return (linux_syscall(LINUX_SYS_linux_close_range, first, last, flags,
+	    0, 0, 0));
 }
 
 long
 linux_epoll_create1(int flags)
 {
 
-	return (linux_syscall(291, flags, 0, 0, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_epoll_create1, flags, 0, 0, 0,
+	    0, 0));
 }
 
 long
 linux_epoll_ctl(int epfd, int op, int fd, struct linux_epoll_event *event)
 {
 
-	return (linux_syscall(233, epfd, op, fd, (long)event, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_epoll_ctl, epfd, op, fd,
+	    (long)event, 0, 0));
 }
 
 long
 linux_epoll_wait(int epfd, struct linux_epoll_event *event)
 {
 
-	return (linux_syscall(232, epfd, (long)event, 1, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_epoll_wait, epfd, (long)event, 1,
+	    0, 0, 0));
 }
 
 long
 linux_fcntl(int fd, int command, long argument)
 {
 
-	return (linux_syscall(72, fd, command, argument, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_fcntl, fd, command, argument, 0,
+	    0, 0));
 }
 
 long
 linux_fork(void)
 {
 
-	return (linux_syscall(57, 0, 0, 0, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_fork, 0, 0, 0, 0, 0, 0));
 }
 
 long
 linux_open(const char *path, int flags, int mode)
 {
 
-	return (linux_syscall(2, (long)path, flags, mode, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_open, (long)path, flags, mode, 0,
+	    0, 0));
 }
 
 long
 linux_pipe(int pipefd[2])
 {
 
-	return (linux_syscall(22, (long)pipefd, 0, 0, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_pipe, (long)pipefd, 0, 0, 0, 0,
+	    0));
 }
 
 long
 linux_waitpid(int pid, int *status)
 {
 
-	return (linux_syscall(61, pid, (long)status, 0, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_wait4, pid, (long)status, 0, 0, 0,
+	    0));
 }
 
 long
 linux_write(int fd, const void *buffer, long length)
 {
 
-	return (linux_syscall(1, fd, (long)buffer, length, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_write, fd, (long)buffer, length,
+	    0, 0, 0));
 }
 
 _Noreturn void
 linux_exit(int status)
 {
 
-	(void)linux_syscall(231, status, 0, 0, 0, 0, 0);
+	(void)linux_syscall(LINUX_SYS_linux_exit_group, status, 0, 0, 0, 0, 0);
 	for (;;)
 		;
 }
@@ -123,77 +141,93 @@ long
 linux_close(int fd)
 {
 
-	return (linux_syscall(57, fd, 0, 0, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_close, fd, 0, 0, 0, 0, 0));
+}
+
+long
+linux_close_range(unsigned int first, unsigned int last, unsigned int flags)
+{
+
+	return (linux_syscall(LINUX_SYS_linux_close_range, first, last, flags,
+	    0, 0, 0));
 }
 
 long
 linux_epoll_create1(int flags)
 {
 
-	return (linux_syscall(20, flags, 0, 0, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_epoll_create1, flags, 0, 0, 0,
+	    0, 0));
 }
 
 long
 linux_epoll_ctl(int epfd, int op, int fd, struct linux_epoll_event *event)
 {
 
-	return (linux_syscall(21, epfd, op, fd, (long)event, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_epoll_ctl, epfd, op, fd,
+	    (long)event, 0, 0));
 }
 
 long
 linux_epoll_wait(int epfd, struct linux_epoll_event *event)
 {
 
-	return (linux_syscall(22, epfd, (long)event, 1, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_epoll_pwait, epfd, (long)event, 1,
+	    0, 0, 0));
 }
 
 long
 linux_fcntl(int fd, int command, long argument)
 {
 
-	return (linux_syscall(25, fd, command, argument, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_fcntl, fd, command, argument, 0,
+	    0, 0));
 }
 
 long
 linux_fork(void)
 {
 
-	return (linux_syscall(220, 17, 0, 0, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_clone, 17, 0, 0, 0, 0, 0));
 }
 
 long
 linux_open(const char *path, int flags, int mode)
 {
 
-	return (linux_syscall(56, -100, (long)path, flags, mode, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_openat, -100, (long)path, flags,
+	    mode, 0, 0));
 }
 
 long
 linux_pipe(int pipefd[2])
 {
 
-	return (linux_syscall(59, (long)pipefd, 0, 0, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_pipe2, (long)pipefd, 0, 0, 0, 0,
+	    0));
 }
 
 long
 linux_waitpid(int pid, int *status)
 {
 
-	return (linux_syscall(260, pid, (long)status, 0, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_wait4, pid, (long)status, 0, 0, 0,
+	    0));
 }
 
 long
 linux_write(int fd, const void *buffer, long length)
 {
 
-	return (linux_syscall(64, fd, (long)buffer, length, 0, 0, 0));
+	return (linux_syscall(LINUX_SYS_linux_write, fd, (long)buffer, length,
+	    0, 0, 0));
 }
 
 _Noreturn void
 linux_exit(int status)
 {
 
-	(void)linux_syscall(94, status, 0, 0, 0, 0, 0);
+	(void)linux_syscall(LINUX_SYS_linux_exit_group, status, 0, 0, 0, 0, 0);
 	for (;;)
 		;
 }

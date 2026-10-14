@@ -21,12 +21,12 @@ struct linux_epoll_event {
 #endif
 	unsigned long data;
 }
-#if defined(__x86_64__)
+#if defined(__amd64__)
 __attribute__((packed))
 #endif
 ;
 
-#if defined(__x86_64__)
+#if defined(__amd64__)
 _Static_assert(sizeof(struct linux_epoll_event) == 12,
     "Linux x86-64 epoll ABI");
 #elif defined(__aarch64__)
@@ -35,6 +35,8 @@ _Static_assert(sizeof(struct linux_epoll_event) == 16,
 #endif
 
 long linux_close(int fd);
+long linux_close_range(unsigned int first, unsigned int last,
+    unsigned int flags);
 long linux_epoll_create1(int flags);
 long linux_epoll_ctl(int epfd, int op, int fd,
     struct linux_epoll_event *event);

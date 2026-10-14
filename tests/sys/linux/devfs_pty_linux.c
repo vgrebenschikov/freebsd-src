@@ -11,9 +11,7 @@ main(void)
 {
 	long fd;
 
-	(void)linux_close(0);
-	(void)linux_close(1);
-	(void)linux_close(2);
+	(void)linux_close_range(0, 2, 0);
 
 	fd = linux_open("/dev/tty", LINUX_O_RDWR, 0);
 	if (fd < 0) {

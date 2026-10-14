@@ -5,7 +5,8 @@
  */
 
 #include "linux_syscalls.h"
-#include "linux_crt0.h"
+
+int main(void);
 
 void
 linux_start(void)
@@ -14,7 +15,7 @@ linux_start(void)
 	linux_exit(main());
 }
 
-#if defined(__x86_64__)
+#if defined(__amd64__)
 __asm__(".global _start\n"
     "_start:\n"
     "xor %ebp,%ebp\n"

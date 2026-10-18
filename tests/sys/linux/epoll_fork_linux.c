@@ -19,8 +19,8 @@ putstr(const char *string)
 		;
 	length = p - string;
 	while (length > 0) {
-		written = linux_write(1, string, length);
-		if (written == -LINUX_EINTR)
+		written = write(1, string, length);
+		if (written == -1 && errno == LINUX_EINTR)
 			continue;
 		if (written <= 0)
 			return;
@@ -63,44 +63,45 @@ test_flags(int flags)
 
 	event.events = LINUX_EPOLLIN;
 	event.data = 0x1234;
-	epfd = setup(linux_epoll_create1(flags), "epoll_create1");
+	epfd = setup(epoll_create1(flags), "epoll_create1");
 	if (epfd < 0)
 		return;
-	if (setup(linux_pipe(pipefd), "pipe") < 0)
+	if (setup(pipe2(pipefd, 0), "pipe2") < 0)
 		return;
-	if (setup(linux_epoll_ctl(epfd, LINUX_EPOLL_CTL_ADD, pipefd[0],
+	if (setup(epoll_ctl(epfd, LINUX_EPOLL_CTL_ADD, pipefd[0],
 	    &event), "epoll_ctl(ADD)") < 0)
 		return;
-	if (setup(linux_write(pipefd[1], "x", 1), "write") < 0)
+	if (setup(write(pipefd[1], "x", 1), "write") < 0)
 		return;
 
-	child = linux_fork();
+	child = clone(LINUX_SIGCHLD, 0, 0, 0, 0);
 	if (child < 0) {
 		(void)setup(child, "fork");
 		return;
 	}
 	if (child == 0) {
 		failed = 0;
-		check("epoll F_GETFD", linux_fcntl(epfd, LINUX_F_GETFD, 0),
+		check("epoll F_GETFD", fcntl(epfd, LINUX_F_GETFD, 0),
 		    flags != 0 ? 1 : 0);
-		check("pipe F_GETFD", linux_fcntl(pipefd[0], LINUX_F_GETFD, 0),
+		check("pipe F_GETFD", fcntl(pipefd[0], LINUX_F_GETFD, 0),
 		    0);
-		check("inherited readiness", linux_epoll_wait(epfd, &output), 1);
+		check("inherited readiness",
+		    epoll_pwait(epfd, &output, 1, 0, 0, 0), 1);
 		check("inherited event data", output.data, event.data);
-		if (setup(linux_pipe(extra), "child pipe") >= 0)
-			check("epoll_ctl after fd allocation", linux_epoll_ctl(epfd,
+		if (setup(pipe2(extra, 0), "child pipe2") >= 0)
+			check("epoll_ctl after fd allocation", epoll_ctl(epfd,
 			    LINUX_EPOLL_CTL_MOD, pipefd[0], &event), 0);
-		linux_exit(failed != 0 ? 1 : 0);
+		exit_group(failed != 0 ? 1 : 0);
 	}
 
 	do {
-		result = linux_waitpid(child, &status);
-	} while (result == -LINUX_EINTR);
+		result = wait4(child, &status, 0, 0);
+	} while (result == -1 && errno == LINUX_EINTR);
 	check("waitpid", result, child);
 	check("child status", status, 0);
-	(void)linux_close(epfd);
-	(void)linux_close(pipefd[0]);
-	(void)linux_close(pipefd[1]);
+	(void)close(epfd);
+	(void)close(pipefd[0]);
+	(void)close(pipefd[1]);
 }
 
 int
@@ -108,6 +109,6 @@ main(void)
 {
 
 	test_flags(0);
-	test_flags(LINUX_EPOLL_CLOEXEC);
+	test_flags(LINUX_O_CLOEXEC);
 	return (failed != 0 ? 1 : 0);
 }

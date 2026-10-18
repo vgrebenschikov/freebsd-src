@@ -8,11 +8,13 @@
 
 int main(void);
 
+int errno;
+
 void
 linux_start(void)
 {
 
-	linux_exit(main());
+	exit_group(main());
 }
 
 #if defined(__amd64__)

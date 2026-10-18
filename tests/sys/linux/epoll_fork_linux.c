@@ -12,14 +12,15 @@ static void
 putstr(const char *string)
 {
 	const char *p;
-	long length, written;
+	linux_size_t length;
+	linux_ssize_t written;
 
 	for (p = string; *p != '\0'; p++)
 		;
 	length = p - string;
 	while (length > 0) {
 		written = linux_write(1, string, length);
-		if (written == -4)
+		if (written == -LINUX_EINTR)
 			continue;
 		if (written <= 0)
 			return;
@@ -58,7 +59,7 @@ test_flags(int flags)
 {
 	struct linux_epoll_event event = { 0 }, output = { 0 };
 	int epfd, extra[2], pipefd[2], status = 0;
-	long child, result;
+	linux_pid_t child, result;
 
 	event.events = LINUX_EPOLLIN;
 	event.data = 0x1234;
@@ -93,8 +94,8 @@ test_flags(int flags)
 	}
 
 	do {
-		result = linux_waitpid((int)child, &status);
-	} while (result == -4);
+		result = linux_waitpid(child, &status);
+	} while (result == -LINUX_EINTR);
 	check("waitpid", result, child);
 	check("child status", status, 0);
 	(void)linux_close(epfd);

@@ -9,7 +9,7 @@
 int
 main(void)
 {
-	long fd;
+	int fd;
 
 	(void)linux_close_range(0, 2, 0);
 

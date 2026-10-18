@@ -13,6 +13,11 @@
 #define	LINUX_EPOLL_CLOEXEC	02000000
 #define	LINUX_EPOLL_CTL_ADD	1
 #define	LINUX_EPOLL_CTL_MOD	3
+#define	LINUX_EINTR	4
+
+typedef int linux_pid_t;
+typedef __SIZE_TYPE__ linux_size_t;
+typedef __PTRDIFF_TYPE__ linux_ssize_t;
 
 struct linux_epoll_event {
 	unsigned int events;
@@ -34,19 +39,19 @@ _Static_assert(sizeof(struct linux_epoll_event) == 16,
     "Linux AArch64 epoll ABI");
 #endif
 
-long linux_close(int fd);
-long linux_close_range(unsigned int first, unsigned int last,
+int linux_close(int fd);
+int linux_close_range(unsigned int first, unsigned int last,
     unsigned int flags);
-long linux_epoll_create1(int flags);
-long linux_epoll_ctl(int epfd, int op, int fd,
+int linux_epoll_create1(int flags);
+int linux_epoll_ctl(int epfd, int op, int fd,
     struct linux_epoll_event *event);
-long linux_epoll_wait(int epfd, struct linux_epoll_event *event);
-long linux_fcntl(int fd, int command, long argument);
-long linux_fork(void);
-long linux_open(const char *path, int flags, int mode);
-long linux_pipe(int pipefd[2]);
-long linux_waitpid(int pid, int *status);
-long linux_write(int fd, const void *buffer, long length);
+int linux_epoll_wait(int epfd, struct linux_epoll_event *event);
+int linux_fcntl(int fd, int command, long argument);
+linux_pid_t linux_fork(void);
+int linux_open(const char *path, int flags, int mode);
+int linux_pipe(int pipefd[2]);
+linux_pid_t linux_waitpid(linux_pid_t pid, int *status);
+linux_ssize_t linux_write(int fd, const void *buffer, linux_size_t length);
 _Noreturn void linux_exit(int status);
 
 #endif /* _LINUX_TEST_SYSCALLS_H_ */

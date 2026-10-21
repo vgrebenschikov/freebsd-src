@@ -15,10 +15,11 @@ LINUX_SYSARCH=	arm64
 .if defined(LINUX_TARGET)
 ATF_TESTS_C+=	devfs_pty
 ATF_TESTS_C+=	epoll_fork
+ATF_TESTS_C+=	ip_pktinfo
 
 LIBADD.devfs_pty=	util
 
-LINUX_HELPERS=	devfs_pty_linux epoll_fork_linux
+LINUX_HELPERS=	devfs_pty_linux epoll_fork_linux ip_pktinfo_linux
 LINUX_CFLAGS=	--target=${LINUX_TARGET} \
 		-I${SRCTOP}/sys -fno-stack-protector -fno-builtin -O2 \
 		-Wall -Wextra -Werror

@@ -43,6 +43,7 @@ _Static_assert(sizeof(struct linux_epoll_event) == 16,
     "Linux AArch64 epoll ABI");
 #endif
 
+int bind(int fd, const void *address, unsigned int address_length);
 int close(int fd);
 int close_range(unsigned int first, unsigned int last,
     unsigned int flags);
@@ -52,6 +53,7 @@ int epoll_ctl(int epfd, int op, int fd,
 int epoll_pwait(int epfd, struct linux_epoll_event *events,
     int maxevents, int timeout, const void *sigmask, linux_size_t sigsetsize);
 int fcntl(int fd, int command, long argument);
+int getsockname(int fd, void *address, unsigned int *address_length);
 #if defined(__amd64__)
 linux_pid_t clone(unsigned long flags, void *stack, int *parent_tid,
     int *child_tid, unsigned long tls);
@@ -61,6 +63,12 @@ linux_pid_t clone(unsigned long flags, void *stack, int *parent_tid,
 #endif
 int openat(int dirfd, const char *path, int flags, int mode);
 int pipe2(int pipefd[2], int flags);
+linux_ssize_t recvmsg(int fd, void *message, int flags);
+linux_ssize_t sendto(int fd, const void *buffer, linux_size_t length,
+    int flags, const void *address, unsigned int address_length);
+int setsockopt(int fd, int level, int name, const void *value,
+    unsigned int value_length);
+int socket(int domain, int type, int protocol);
 linux_pid_t wait4(linux_pid_t pid, int *status, int options,
     void *rusage);
 linux_ssize_t write(int fd, const void *buffer, linux_size_t length);

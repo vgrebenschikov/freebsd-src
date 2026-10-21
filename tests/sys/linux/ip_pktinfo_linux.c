@@ -1,0 +1,163 @@
+/*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2026 Vladimir Grebenshchikov <vova@zote.me>
+ */
+
+#include "linux_syscalls.h"
+
+#define	LINUX_AF_INET		2
+#define	LINUX_SOCK_DGRAM	2
+#define	LINUX_SOL_IP		0
+#define	LINUX_IP_PKTINFO	8
+
+struct linux_sockaddr_in {
+	unsigned short sin_family;
+	unsigned short sin_port;
+	unsigned int sin_addr;
+	unsigned char sin_zero[8];
+};
+
+struct linux_iovec {
+	void *iov_base;
+	linux_size_t iov_len;
+};
+
+struct linux_msghdr {
+	void *msg_name;
+	unsigned int msg_namelen;
+	struct linux_iovec *msg_iov;
+	linux_size_t msg_iovlen;
+	void *msg_control;
+	linux_size_t msg_controllen;
+	unsigned int msg_flags;
+};
+
+struct linux_cmsghdr {
+	linux_size_t cmsg_len;
+	int cmsg_level;
+	int cmsg_type;
+};
+
+struct linux_in_pktinfo {
+	int ipi_ifindex;
+	unsigned int ipi_spec_dst;
+	unsigned int ipi_addr;
+};
+
+#define	LINUX_CMSG_ALIGN(length)					\
+	(((length) + sizeof(linux_size_t) - 1) & ~(sizeof(linux_size_t) - 1))
+#define	LINUX_CMSG_DATA(cmsg)					\
+	((void *)((char *)(cmsg) + LINUX_CMSG_ALIGN(sizeof(*(cmsg)))))
+
+_Static_assert(sizeof(struct linux_in_pktinfo) == 12,
+    "Linux in_pktinfo ABI");
+
+static int failed;
+
+static void
+putstr(const char *string)
+{
+	const char *p;
+	linux_size_t length;
+	linux_ssize_t written;
+
+	for (p = string; *p != '\0'; p++)
+		;
+	length = p - string;
+	while (length > 0) {
+		written = write(1, string, length);
+		if (written == -1 && errno == LINUX_EINTR)
+			continue;
+		if (written <= 0)
+			return;
+		string += written;
+		length -= written;
+	}
+}
+
+static void
+check(int condition, const char *description)
+{
+
+	if (condition)
+		return;
+	putstr("FAIL: ");
+	putstr(description);
+	putstr("\n");
+	failed++;
+}
+
+static int
+setup(long result, const char *description)
+{
+
+	if (result >= 0)
+		return ((int)result);
+	putstr("SETUP FAILED: ");
+	putstr(description);
+	putstr("\n");
+	failed++;
+	return (-1);
+}
+
+int
+main(void)
+{
+	struct linux_sockaddr_in address = { 0 };
+	struct linux_in_pktinfo *pktinfo;
+	struct linux_cmsghdr *cmsg;
+	struct linux_iovec iov;
+	struct linux_msghdr msg = { 0 };
+	unsigned char control[64] = { 0 };
+	unsigned int address_length;
+	char byte, received;
+	int fd, enabled;
+
+	fd = setup(socket(LINUX_AF_INET, LINUX_SOCK_DGRAM, 0), "socket");
+	if (fd < 0)
+		return (1);
+	enabled = 1;
+	if (setup(setsockopt(fd, LINUX_SOL_IP, LINUX_IP_PKTINFO, &enabled,
+	    sizeof(enabled)), "setsockopt(IP_PKTINFO)") < 0)
+		return (1);
+
+	address.sin_family = LINUX_AF_INET;
+	address.sin_addr = __builtin_bswap32(0x7f000001U);
+	if (setup(bind(fd, &address, sizeof(address)), "bind") < 0)
+		return (1);
+	address_length = sizeof(address);
+	if (setup(getsockname(fd, &address, &address_length), "getsockname") < 0)
+		return (1);
+
+	byte = 'x';
+	if (setup(sendto(fd, &byte, sizeof(byte), 0, &address,
+	    sizeof(address)), "sendto") < 0)
+		return (1);
+
+	iov.iov_base = &received;
+	iov.iov_len = sizeof(received);
+	msg.msg_iov = &iov;
+	msg.msg_iovlen = 1;
+	msg.msg_control = control;
+	msg.msg_controllen = sizeof(control);
+	if (setup(recvmsg(fd, &msg, 0), "recvmsg") < 0)
+		return (1);
+
+	check(received == byte, "received payload");
+	check(msg.msg_controllen >= sizeof(*cmsg), "control message present");
+	cmsg = (struct linux_cmsghdr *)(void *)control;
+	check(cmsg->cmsg_level == LINUX_SOL_IP, "IP_PKTINFO cmsg level");
+	check(cmsg->cmsg_type == LINUX_IP_PKTINFO, "IP_PKTINFO cmsg type");
+	check(cmsg->cmsg_len >= LINUX_CMSG_ALIGN(sizeof(*cmsg)) +
+	    sizeof(*pktinfo), "IP_PKTINFO cmsg length");
+	pktinfo = LINUX_CMSG_DATA(cmsg);
+	check(pktinfo->ipi_ifindex > 0, "IP_PKTINFO interface index");
+	check(pktinfo->ipi_spec_dst == address.sin_addr,
+	    "IP_PKTINFO local address");
+	check(pktinfo->ipi_addr == address.sin_addr,
+	    "IP_PKTINFO destination address");
+
+	(void)close(fd);
+	return (failed != 0 ? 1 : 0);
+}

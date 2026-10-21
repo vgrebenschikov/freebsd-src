@@ -63,6 +63,10 @@ linux_pid_t clone(unsigned long flags, void *stack, int *parent_tid,
 #endif
 int openat(int dirfd, const char *path, int flags, int mode);
 int pipe2(int pipefd[2], int flags);
+int ppoll(void *fds, unsigned int count, void *timeout, const void *sigmask,
+    linux_size_t sigsetsize);
+int recvmmsg(int fd, void *messages, unsigned int count, int flags,
+    void *timeout);
 linux_ssize_t recvmsg(int fd, void *message, int flags);
 linux_ssize_t sendto(int fd, const void *buffer, linux_size_t length,
     int flags, const void *address, unsigned int address_length);

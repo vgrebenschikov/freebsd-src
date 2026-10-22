@@ -68,6 +68,7 @@ int ppoll(void *fds, unsigned int count, void *timeout, const void *sigmask,
 int recvmmsg(int fd, void *messages, unsigned int count, int flags,
     void *timeout);
 linux_ssize_t recvmsg(int fd, void *message, int flags);
+linux_ssize_t sendmsg(int fd, const void *message, int flags);
 linux_ssize_t sendto(int fd, const void *buffer, linux_size_t length,
     int flags, const void *address, unsigned int address_length);
 int setsockopt(int fd, int level, int name, const void *value,
